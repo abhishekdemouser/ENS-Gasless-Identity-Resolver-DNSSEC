@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>ENS Gasless Identity Resolver</title>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.8.1/dist/ethers.umd.min.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 2em; background: #f5f5f5; }
+    input, button { padding: 0.5em; font-size: 1em; }
+    #result { margin-top: 1em; background: #fff; padding: 1em; border-radius: 8px; box-shadow: 0 0 5px #ccc; }
+    footer { margin-top: 3em; font-size: 0.9em; color: #666; text-align: center; }
+  </style>
+</head>
+<body>
+  <h2>ENS Gasless Identity Resolver (via DNSSEC)</h2>
+  <p>Enter an ENS-linked domain (e.g., <code>preferido.us</code>) and sign a message with your wallet. We'll verify the recovered address matches the offchain DNSSEC record.</p>
+
+  <input type="text" id="domain" value="preferido.us" placeholder="ENS domain" />
+  <button onclick="signAndVerify()">Sign Message & Verify</button>
+
+  <div id="result"></div>
+
+  <footer>
+    <p><strong>Preferido | Nuture</strong> — ENS Gasless Identity Resolver Verification.<br>
+    This tool enables gasless verification of ENS-linked domains via DNSSEC. It is ideal for domains like <code>preferido.us</code> using secure TXT records and Ethereum wallet-based message signing.<br>
+    Learn more at:
+    <br><a href="https://abhishekdemouser.wixsite.com/ens-domain-is-nuture" target="_blank">https://abhishekdemouser.wixsite.com/ens-domain-is-nuture</a>
+    <br><a href="https://abhishekdemouser.wixsite.com/ens-domain-is-nuture/blog" target="_blank">ENS & DNSSEC Blog</a>
+    </p>
+  </footer>
+
+  <script>
+    async function signAndVerify() {
+      const domain = document.getElementById('domain').value.trim();
+      const result = document.getElementById('result');
+      result.innerHTML = '⏳ Resolving ENS domain...';
+
+      try {
+        const dnsRes = await fetch(`https://dns.lookup.ens.domains/resolve/${domain}`);
+        const json = await dnsRes.json();
+
+        if (!json.owner) throw new Error('No owner found in ENS offchain resolution.');
+        const resolvedAddress = json.owner;
+
+        const message = `I am proving control over ${domain} on ${new Date().toISOString()}`;
+        await window.ethereum.request({ method: 'eth_requestAccounts' });
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const signer = await provider.getSigner();
+        const signature = await signer.signMessage(message);
+        const recovered = ethers.verifyMessage(message, signature);
+
+        const match = recovered.toLowerCase() === resolvedAddress.toLowerCase();
+
+        result.innerHTML = `
+          ✅ ENS domain <b>${domain}</b> resolved to:<br><code>${resolvedAddress}</code><br><br>
+          🔏 Signed Message:<br><code>${message}</code><br><br>
+          📜 Signature:<br><code>${signature}</code><br><br>
+          🔍 Recovered Address:<br><code>${recovered}</code><br><br>
+          ${match ? '✅ <b>Signature matches ENS identity!</b>' : '❌ Signature does NOT match ENS identity!'}
+        `;
+      } catch (err) {
+        result.innerHTML = `❌ Error: ${err.message}`;
+      }
+    }
+  </script>
+</body>
+</html>
