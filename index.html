@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ENS DNSSEC & Gasless Verifier</title>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.8.1/dist/ethers.umd.min.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 2em; background: #f5f5f5; }
+    input, button { padding: 0.5em; font-size: 1em; margin-top: 0.5em; }
+    pre, #result, #dnssecResultBox { margin-top: 1em; background: #fff; padding: 1em; border-radius: 8px; box-shadow: 0 0 5px #ccc; white-space: pre-wrap; }
+    footer { margin-top: 3em; font-size: 0.9em; color: #666; text-align: center; }
+  </style>
+</head>
+<body>
+  <h1>🔍 ENS DNSSEC TXT Record Lookup</h1>
+
+  <label for="dnssecDomainInput">Enter domain name:</label><br>
+  <input type="text" id="dnssecDomainInput" placeholder="preferido.us" value="preferido.us"/>
+  <button onclick="lookupTXT()">Lookup TXT Record</button>
+
+  <pre id="dnssecResultBox">Waiting for DNSSEC lookup...</pre>
+
+  <hr>
+
+  <h2>ENS Gasless Identity Resolver (via DNSSEC)</h2>
+  <p>Enter an ENS-linked domain and sign a message with your wallet. We'll verify the recovered address matches the offchain DNSSEC record.</p>
+
+  <input type="text" id="domain" value="preferido.us" placeholder="ENS domain" />
+  <button onclick="signAndVerify()">Sign Message & Verify</button>
+
+  <div id="result"></div>
+
+  <footer>
+    <p><strong>Preferido | Nuture</strong> — ENS Gasless Identity Resolver Verification.<br>
+    This tool enables gasless verification of ENS-linked domains via DNSSEC. Ideal for domains like <code>preferido.us</code> using secure TXT records and Ethereum wallet-based message signing.<br>
+    Learn more at:
+    <br><a href="https://abhishekdemouser.wixsite.com/ens-domain-is-nuture" target="_blank">ENS & DNSSEC Portal</a>
+    <br><a href="https://abhishekdemouser.wixsite.com/ens-domain-is-nuture/blog" target="_blank">ENS & DNSSEC Blog</a>
+    </p>
+  </footer>
+
+  <script>
+    async function lookupTXT() {
+      const domain = document.getElementById('dnssecDomainInput').value.trim();
+      const resultBox = document.getElementById('dnssecResultBox');
+      resultBox.textContent = "⏳ Resolving _ens TXT record for " + domain + "...";
+
+      try {
+        const response = await fetch(`https://cloudflare-dns.com/dns-query?name=_ens.${domain}&type=TXT`, {
+          headers: {
+            'Accept': 'application/dns-json'
+          }
+        });
+
+        const data = await response.json();
+        const records = (data.Answer || [])
+          .map(a => a.data.replace(/^\"|\"$/g, '').replace(/\" \"?/g, ''))
+          .filter(txt => txt.includes("ENS1"));
+
+        if (records.length > 0) {
+          const record = records[0];
+          const ethMatch = record.match(/0x[a-fA-F0-9]{40}/);
+          resultBox.textContent = `✅ Found ENS1 record:\n${record}\n\nEthereum Address: ${ethMatch ? ethMatch[0] : '⚠️ Not found'}`;
+          window.latestResolvedAddress = ethMatch ? ethMatch[0] : null;
+        } else {
+          resultBox.textContent = `❌ No ENS1 TXT record found for _ens.${domain}`;
+          window.latestResolvedAddress = null;
+        }
+      } catch (err) {
+        resultBox.textContent = "❌ DNS query failed: " + err;
+        window.latestResolvedAddress = null;
+      }
+    }
+
+    async function signAndVerify() {
+      const domain = document.getElementById('domain').value.trim();
+      const result = document.getElementById('result');
+      result.innerHTML = '⏳ Verifying with latest ENS1 TXT record...';
+
+      try {
+        const resolvedAddress = window.latestResolvedAddress;
+        if (!resolvedAddress) throw new Error('No resolved Ethereum address from TXT record. Run the DNSSEC lookup first.');
+
+        if (typeof window.ethereum === 'undefined') {
+          throw new Error('Ethereum provider not found. Please install MetaMask.');
+        }
+
+        await window.ethereum.request({ method: 'eth_requestAccounts' });
+        const browserProvider = new ethers.BrowserProvider(window.ethereum);
+        const signer = await browserProvider.getSigner();
+
+        const message = `I am proving control over ${domain} on ${new Date().toISOString()}`;
+        const signature = await signer.signMessage(message);
+        const recovered = ethers.verifyMessage(message, signature);
+
+        const match = recovered.toLowerCase() === resolvedAddress.toLowerCase();
+
+        result.innerHTML = `
+          ✅ ENS domain <b>${domain}</b> resolved to:<br><code>${resolvedAddress}</code><br><br>
+          🔏 Signed Message:<br><code>${message}</code><br><br>
+          📜 Signature:<br><code>${signature}</code><br><br>
+          🔍 Recovered Address:<br><code>${recovered}</code><br><br>
+          ${match ? '✅ <b>Signature matches ENS identity!</b>' : '❌ Signature does NOT match ENS identity!'}
+        `;
+      } catch (err) {
+        result.innerHTML = `❌ Error: ${err.message}`;
+      }
+    }
+  </script>
+</body>
+</html>
